@@ -11,3 +11,7 @@ ATAC-seq analysis of chromatin accessibility underlying caste differentiation in
 
 ### `zga_caste_co_motif_analysis.R` 
 **ZGA-Caste Co-motif Interaction Analysis**: Analyzes the co-occurrence of zygotic genome activation (ZGA) transcription factor motifs with caste-specific motifs in chromatin accessibility regions. The script performs 6 different comparative analyses and generates comprehensive statistical reports with visualizations of motif interactions.
+
+### `ant-caste-TF-bias_AME.R`
+**Caste-biased Transcription Factor Identification from Motif Enrichment**：This script identifies and ranks caste-biased transcription factors based on motif enrichment analyses.
+
