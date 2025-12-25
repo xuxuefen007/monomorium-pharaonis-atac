@@ -1,4 +1,4 @@
-# ============================== 1) TF importance ranking (stage-weighted) ==============================
+# ============================== 1) Motif importance ranking (stage-weighted) ==============================
 #
 # Input files:
 #   *_with_log2.txt files are derived from the original AME (MEME Suite) motif enrichment outputs.
@@ -23,7 +23,7 @@
 #   estimate for rare motifs (hence the suffix "_p05").
 #
 # Note on caste-specific processing:
-#   Gyne and worker are processed separately. This block computes TF importance for the gyne dataset
+#   Gyne and worker are processed separately. This block computes motif importance for the gyne dataset
 #   only (input_dir points to gyne-specific AME-derived *_with_log2.txt files). An analogous pipeline
 #   should be run for worker in a separate directory (e.g. worker_with_log2), and integration is done
 #   in later sections of this script.
@@ -79,10 +79,11 @@ rownames(combined_data) <- NULL
 # Load required library
 library(dplyr)
 
-# De-duplication at the TF level:
-#   AME outputs contain one row per motif per stage, so the same TF (motif_ID/motif_alt_ID) appears
-#   repeatedly across developmental stages. Here we collapse these repeated entries by grouping on
-#   (motif_ID, motif_alt_ID) and summarizing across stages, resulting in ONE row per TF.
+# De-duplication at the motif level (cross-stage aggregation):
+#   AME outputs contain one row per motif per stage, so the same motif (motif_ID/motif_alt_ID)
+#   appears repeatedly across developmental stages. Here we collapse these repeated motif entries
+#   by grouping on (motif_ID, motif_alt_ID) and summarizing across stages, resulting in ONE row
+#   per motif.
 tf_scores_raw <- combined_data %>%
   group_by(motif_ID, motif_alt_ID) %>%
   summarise(
@@ -145,7 +146,7 @@ write.csv(final_result, output_file, row.names = FALSE)
 # Note: worker uses the same procedure (not shown here)
 # worker_ame_dir <- "/data/work/caste_biased_list/worker_with_log2"
 
-# ============================== 2) TF bias analysis between gyne and worker ==============================
+# ============================== 2) Motif bias analysis between gyne and worker ==============================
 
 # Set paths
 gyne_ame_dir <- "/data/work/caste_biased_list/gyne_with_log2"
@@ -187,10 +188,10 @@ gyne_ame_raw <- read_ame_files(gyne_ame_dir)
 cat("Reading worker data...\n")
 worker_ame_raw <- read_ame_files(worker_ame_dir)
 
-cat("Gyne data: ", nrow(gyne_ame_raw), " rows; ", n_distinct(gyne_ame_raw$motif_ID), " TFs\n")
-cat("Worker data: ", nrow(worker_ame_raw), " rows; ", n_distinct(worker_ame_raw$motif_ID), " TFs\n")
+cat("Gyne data: ", nrow(gyne_ame_raw), " rows; ", n_distinct(gyne_ame_raw$motif_ID), " motifs\n")
+cat("Worker data: ", nrow(worker_ame_raw), " rows; ", n_distinct(worker_ame_raw$motif_ID), " motifs\n")
 
-# Compute mean metrics per TF across stages
+# Compute mean metrics per motif across stages
 calculate_tf_stats <- function(ame_data, caste_name) {
   tf_stats <- ame_data %>%
     group_by(motif_ID, motif_alt_ID) %>%
@@ -206,22 +207,22 @@ calculate_tf_stats <- function(ame_data, caste_name) {
   return(tf_stats)
 }
 
-cat("Computing TF-level statistics...\n")
+cat("Computing motif-level summary statistics...\n")
 gyne_stats <- calculate_tf_stats(gyne_ame_raw, "gyne")
 worker_stats <- calculate_tf_stats(worker_ame_raw, "worker")
 
-# Identify shared TFs (appear in both gyne and worker)
+# Identify shared motifs (appear in both gyne and worker)
 common_tfs <- intersect(gyne_stats$motif_ID, worker_stats$motif_ID)
-cat("Number of shared TFs:", length(common_tfs), "\n")
+cat("Number of shared motifs:", length(common_tfs), "\n")
 
 if (length(common_tfs) == 0) {
-  stop("No shared TFs found; bias analysis cannot proceed.")
+  stop("No shared motifs found; bias analysis cannot proceed.")
 }
 
 gyne_common <- gyne_stats %>% filter(motif_ID %in% common_tfs)
 worker_common <- worker_stats %>% filter(motif_ID %in% common_tfs)
 
-# Compute bias metrics for shared TFs
+# Compute bias metrics for shared motifs
 cat("Computing bias metrics...\n")
 bias_analysis <- gyne_common %>%
   inner_join(worker_common,
@@ -275,7 +276,7 @@ cat("Moderate threshold:", round(final_threshold_moderate, 3), "\n")
 cat("Log2 ratio strong threshold:", round(log2_threshold_strong, 3), "\n")
 cat("Log2 ratio moderate threshold:", round(log2_threshold_moderate, 3), "\n")
 
-# Apply thresholds to classify TFs
+# Apply thresholds to classify motifs
 bias_analysis <- bias_analysis %>%
   mutate(
     bias_strength = case_when(
@@ -346,7 +347,7 @@ bias_analysis_sorted <- bias_analysis %>%
                        FUN = function(x) rank(x, ties.method = "first"))
   )
 
-# Print top 3 TFs per category
+# Print top 3 motifs per category
 for (category in category_order) {
   if (category %in% bias_analysis_sorted$absolute_bias_category) {
     cat("\n", category, "(Top 3):\n")
@@ -364,20 +365,20 @@ output_file <- file.path(output_dir, "TF_scientific_bias_classification.csv")
 write.csv(bias_analysis_sorted, output_file, row.names = FALSE)
 
 cat("\nBias classification completed.\n")
-cat("Shared TFs:", length(common_tfs), "\n")
+cat("Shared motifs:", length(common_tfs), "\n")
 cat("Output file:", output_file, "\n")
 cat("Threshold plot: scientific_threshold_distribution.pdf\n")
 
 # Final summary
 cat("\n=== Final summary ===\n")
-cat("Strong TFs:", sum(grepl("Strong", bias_analysis$absolute_bias_category)), "\n")
-cat("Moderate TFs:", sum(grepl("Moderate", bias_analysis$absolute_bias_category)), "\n")
-cat("Weak TFs:", sum(grepl("Weak", bias_analysis$absolute_bias_category)), "\n")
-cat("Gyne-biased TFs:", sum(grepl("Gyne", bias_analysis$absolute_bias_category)), "\n")
-cat("Worker-biased TFs:", sum(grepl("Worker", bias_analysis$absolute_bias_category)), "\n")
+cat("Strong motifs:", sum(grepl("Strong", bias_analysis$absolute_bias_category)), "\n")
+cat("Moderate motifs:", sum(grepl("Moderate", bias_analysis$absolute_bias_category)), "\n")
+cat("Weak motifs:", sum(grepl("Weak", bias_analysis$absolute_bias_category)), "\n")
+cat("Gyne-biased motifs:", sum(grepl("Gyne", bias_analysis$absolute_bias_category)), "\n")
+cat("Worker-biased motifs:", sum(grepl("Worker", bias_analysis$absolute_bias_category)), "\n")
 
 
-##-------------------------- 3) Integrate into final unique TF lists -------------------#
+##-------------------------- 3) Integrate into final unique motif lists -------------------#
 # ================== Set paths ==================
 gyne_ranking_file <- "/data/work/caste_biased_list/duplicate/gyne_TF_importance_ranking_stage_weighted.csv"
 worker_ranking_file <- "/data/work/caste_biased_list/duplicate/worker_TF_importance_ranking_stage_weighted.csv"
@@ -401,19 +402,19 @@ gyne_ranking <- gyne_ranking %>%
 worker_ranking <- worker_ranking %>%
   rename_with(~ paste0(., "_worker"), -c(motif_ID, motif_alt_ID))
 
-# Identify unique and shared TFs across gyne/worker rankings
+# Identify unique and shared motifs across gyne/worker rankings
 all_gyne_tfs <- unique(gyne_ranking$motif_ID)
 all_worker_tfs <- unique(worker_ranking$motif_ID)
 common_tfs <- intersect(all_gyne_tfs, all_worker_tfs)
 
-cat("TF counts:\n")
-cat("Gyne TFs (total):", length(all_gyne_tfs), "\n")
-cat("Worker TFs (total):", length(all_worker_tfs), "\n")
-cat("Shared TFs:", length(common_tfs), "\n")
+cat("Motif counts:\n")
+cat("Gyne motifs (total):", length(all_gyne_tfs), "\n")
+cat("Worker motifs (total):", length(all_worker_tfs), "\n")
+cat("Shared motifs:", length(common_tfs), "\n")
 
 # De-duplication by assignment:
-#   Shared TFs (common_tfs) must NOT appear in both final outputs.
-#   We assign each shared TF to exactly one caste (gyne or worker) using the bias classification.
+#   Shared motifs (common_tfs) must NOT appear in both final outputs.
+#   We assign each shared motif to exactly one caste (gyne or worker) using the bias classification.
 bias_classification <- bias_analysis %>%
   select(motif_ID, motif_alt_ID, absolute_bias_category, confidence_score)
 
@@ -425,12 +426,12 @@ worker_biased_tfs <- bias_classification %>%
   filter(grepl("Worker", absolute_bias_category)) %>%
   pull(motif_ID)
 
-cat("Gyne-biased shared TFs:", length(gyne_biased_tfs), "\n")
-cat("Worker-biased shared TFs:", length(worker_biased_tfs), "\n")
+cat("Gyne-biased shared motifs:", length(gyne_biased_tfs), "\n")
+cat("Worker-biased shared motifs:", length(worker_biased_tfs), "\n")
 
-# Build final gyne TF list (de-duplicated):
-#   Keep (i) gyne-unique TFs, and (ii) shared TFs classified as Gyne-biased.
-#   Shared TFs classified as Worker-biased are excluded here to prevent duplication.
+# Build final gyne motif list (de-duplicated):
+#   Keep (i) gyne-unique motifs, and (ii) shared motifs classified as Gyne-biased.
+#   Shared motifs classified as Worker-biased are excluded here to prevent duplication.
 final_gyne_tfs <- gyne_ranking %>%
   filter(!motif_ID %in% common_tfs | motif_ID %in% gyne_biased_tfs) %>%
   left_join(bias_classification %>% select(motif_ID, absolute_bias_category, confidence_score),
@@ -442,9 +443,9 @@ final_gyne_tfs <- gyne_ranking %>%
   select(final_rank, motif_ID, motif_alt_ID, tf_type, absolute_bias_category,
          composite_score_gyne, confidence_score, everything())
 
-# Build final worker TF list (de-duplicated):
-#   Keep (i) worker-unique TFs, and (ii) shared TFs classified as Worker-biased.
-#   Shared TFs classified as Gyne-biased are excluded here to prevent duplication.
+# Build final worker motif list (de-duplicated):
+#   Keep (i) worker-unique motifs, and (ii) shared motifs classified as Worker-biased.
+#   Shared motifs classified as Gyne-biased are excluded here to prevent duplication.
 final_worker_tfs <- worker_ranking %>%
   filter(!motif_ID %in% common_tfs | motif_ID %in% worker_biased_tfs) %>%
   left_join(bias_classification %>% select(motif_ID, absolute_bias_category, confidence_score),
@@ -463,7 +464,7 @@ write.csv(final_gyne_tfs, gyne_output, row.names = FALSE)
 worker_output <- file.path(output_dir, "final_worker_unique_tfs.csv")
 write.csv(final_worker_tfs, worker_output, row.names = FALSE)
 
-# Save shared TF assignment details
+# Save shared motif assignment details
 shared_tfs_output <- file.path(output_dir, "shared_tfs_assignment.csv")
 shared_tfs_info <- bias_analysis %>%
   select(motif_ID, motif_alt_ID, absolute_bias_category, confidence_score,
@@ -473,25 +474,25 @@ shared_tfs_info <- bias_analysis %>%
 write.csv(shared_tfs_info, shared_tfs_output, row.names = FALSE)
 
 # Report summary
-cat("\n=== Final TF assignment summary ===\n")
-cat("Final gyne TFs:", nrow(final_gyne_tfs), "\n")
+cat("\n=== Final motif assignment summary ===\n")
+cat("Final gyne motifs:", nrow(final_gyne_tfs), "\n")
 cat("  - Gyne-unique:", sum(final_gyne_tfs$tf_type == "Gyne_unique"), "\n")
 cat("  - Shared (gyne-biased):", sum(final_gyne_tfs$tf_type == "Shared_Gyne_biased"), "\n")
 
-cat("Final worker TFs:", nrow(final_worker_tfs), "\n")
+cat("Final worker motifs:", nrow(final_worker_tfs), "\n")
 cat("  - Worker-unique:", sum(final_worker_tfs$tf_type == "Worker_unique"), "\n")
 cat("  - Shared (worker-biased):", sum(final_worker_tfs$tf_type == "Shared_Worker_biased"), "\n")
 
-cat("\nTop 5 gyne TFs:\n")
+cat("\nTop 5 gyne motifs:\n")
 print(final_gyne_tfs %>% head(5) %>% select(final_rank, motif_alt_ID, tf_type, composite_score_gyne))
 
-cat("\nTop 5 worker TFs:\n")
+cat("\nTop 5 worker motifs:\n")
 print(final_worker_tfs %>% head(5) %>% select(final_rank, motif_alt_ID, tf_type, composite_score_worker))
 
 # Summary table
 summary_stats <- data.frame(
-  Category = c("Total_Gyne_TFs", "Total_Worker_TFs",
-               "Unique_Gyne_TFs", "Unique_Worker_TFs",
+  Category = c("Total_Gyne_motifs", "Total_Worker_motifs",
+               "Unique_Gyne_motifs", "Unique_Worker_motifs",
                "Shared_Gyne_Biased", "Shared_Worker_Biased"),
   Count = c(nrow(final_gyne_tfs), nrow(final_worker_tfs),
             sum(final_gyne_tfs$tf_type == "Gyne_unique"),
@@ -504,9 +505,7 @@ write.csv(summary_stats, file.path(output_dir, "final_assignment_summary.csv"), 
 
 cat("\nIntegration completed.\n")
 cat("Output directory:", output_dir, "\n")
-cat("final_gyne_unique_tfs.csv - Final gyne TF list (ranked)\n")
-cat("final_worker_unique_tfs.csv - Final worker TF list (ranked)\n")
-cat("shared_tfs_assignment.csv - Shared TF assignment details\n")
+cat("final_gyne_unique_tfs.csv - Final gyne motif list (ranked)\n")
+cat("final_worker_unique_tfs.csv - Final worker motif list (ranked)\n")
+cat("shared_tfs_assignment.csv - Shared motif assignment details\n")
 cat("final_assignment_summary.csv - Summary statistics\n")
-
-
