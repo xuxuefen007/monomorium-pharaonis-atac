@@ -30,4 +30,8 @@ ATAC-seq analysis of chromatin accessibility underlying caste differentiation in
 ### `motif_embedding_RF_SVM_nestedCV.R`
 **Nested cross-validated RF and SVM classification of high-confidence caste-biased motifs**：This script applies an information-content–weighted PPMI–SVD motif embedding followed by nested cross-validation with Random Forest and linear SVM classifiers to evaluate and classify high-confidence gyne- and worker-biased transcription factor motifs. Model performance is assessed using standard metrics, and motifs with inconsistent predictions are highlighted as potential boundary or ambiguous regulators.
 
+### `motif_alignment_nmds_permanova.R`
+**PWM alignment–based analysis of motif similarity and caste structure**：This script computes pairwise motif similarity using Smith–Waterman–style local alignment of position frequency matrices (PFMs), converts alignment scores into a distance matrix, and analyzes the resulting motif similarity space using NMDS, PERMANOVA, ANOSIM, and beta-dispersion. It evaluates whether gyne- and worker-biased motifs occupy distinct regions in alignment-based motif space and assesses the consistency between alignment-based distances and embedding-based distances using a Mantel test.
+
+
 
