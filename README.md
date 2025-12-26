@@ -33,5 +33,6 @@ ATAC-seq analysis of chromatin accessibility underlying caste differentiation in
 ### `motif_alignment_nmds_permanova.R`
 **PWM alignment–based analysis of motif similarity and caste structure**：This script computes pairwise motif similarity using Smith–Waterman–style local alignment of position frequency matrices (PFMs), converts alignment scores into a distance matrix, and analyzes the resulting motif similarity space using NMDS, PERMANOVA, ANOSIM, and beta-dispersion. It evaluates whether gyne- and worker-biased motifs occupy distinct regions in alignment-based motif space and assesses the consistency between alignment-based distances and embedding-based distances using a Mantel test.
 
-
+### `tobias_caste_analysis.py`
+**Stage-integrated scoring and classification of caste-biased transcription factor motifs**：This script integrates TOBIAS BINDetect results across multiple developmental stages, applies stage-specific weighting, and computes composite scores to classify transcription factor motifs as gyne-biased, worker-biased, or neutral. It combines information on binding site abundance, footprint strength, differential binding, statistical significance, and developmental persistence to rank motifs and identify lineage-specific and canalizing regulatory candidates.
 
