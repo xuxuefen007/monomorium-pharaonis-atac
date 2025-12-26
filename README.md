@@ -27,3 +27,7 @@ ATAC-seq analysis of chromatin accessibility underlying caste differentiation in
 ### `motif_embedding_tsne_umap.R`
 **Motif embedding–based t-SNE and UMAP clustering of high-confidence caste-biased motifs**：This script performs embedding-based clustering and visualization of high-confidence gyne- and worker-biased transcription factor motifs obtained after RF/LDA-based boundary filtering. Motifs are embedded using an information-content–weighted distributional representation (PPMI with truncated SVD, as a stable alternative to GloVe) and visualized with t-SNE and UMAP. Clustering quality is assessed using adjusted Rand index, purity, and classification accuracy, with misclassified motifs explicitly highlighted for diagnostic purposes.
 
+### `motif_embedding_RF_SVM_nestedCV.R`
+**Nested cross-validated RF and SVM classification of high-confidence caste-biased motifs**：This script applies an information-content–weighted PPMI–SVD motif embedding followed by nested cross-validation with Random Forest and linear SVM classifiers to evaluate and classify high-confidence gyne- and worker-biased transcription factor motifs. Model performance is assessed using standard metrics, and motifs with inconsistent predictions are highlighted as potential boundary or ambiguous regulators.
+
+
