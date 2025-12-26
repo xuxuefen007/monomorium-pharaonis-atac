@@ -17,3 +17,7 @@ ATAC-seq analysis of chromatin accessibility underlying caste differentiation in
 
 ### `rf_motif_classification.R` 
 **Motif Classification Using Random Forest**: This script performs motif classification using a Random Forest (RF) model to distinguish between gyne- and worker-biased motifs in chromatin accessibility regions. The analysis includes parsing position frequency matrices (PFMs), extracting key features from the motifs, training the RF classifier, and evaluating model performance with confusion matrices, error rates, and feature importance analysis. The output also includes visualizations such as heatmaps of motif probabilities and proximity between samples.
+
+### `rf_shap_perm_analysis.R`
+**Random Forest Feature Importance with Permutation and SHAP**: This script trains a Random Forest (RF) classifier on PFM-derived motif features to distinguish gyne- and worker-biased motifs, and provides complementary feature-importance interpretations using Gini importance, permutation importance (ROC AUC), and SHAP (fastshap). The workflow includes parsing PFMs, extracting IC/GC/AT and base-composition features, training the RF model, computing permutation importance (nsim = 20) and SHAP values (nsim = 200), and exporting publication-ready plots (Gini barplot, permutation importance barplot, SHAP importance barplot, and SHAP beeswarm) to the output directory.
+
