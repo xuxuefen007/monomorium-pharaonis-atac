@@ -148,56 +148,7 @@ analyze_maternal_clearance_unified <- function(gene_expression, gene_name) {
   return(out)
 }
 
-# ==================== 5) Zygotic activation analysis across the embryo time series ====================
-# Strategy:
-# - compute mean TPM per stage across the full stage series,
-# - define trough stage = minimum mean TPM,
-# - define peak stage   = maximum mean TPM,
-# - perform a two-sample t-test comparing trough vs peak samples,
-# - compute activation ratio and log2 activation.
-analyze_zygotic_activation <- function(gene_expression, gene_name, stage_order) {
-
-  stage_stats <- gene_expression %>%
-    filter(DevelopmentalStage %in% stage_order) %>%
-    group_by(DevelopmentalStage) %>%
-    summarise(Mean_TPM = mean(TPM), .groups = "drop")
-
-  if(nrow(stage_stats) < 3) return(NULL)
-
-  trough_stage <- stage_stats[which.min(stage_stats$Mean_TPM), , drop = FALSE]
-  peak_stage   <- stage_stats[which.max(stage_stats$Mean_TPM), , drop = FALSE]
-  early_stage  <- stage_stats[stage_stats$DevelopmentalStage == "Embryo_0-12h", , drop = FALSE]
-
-  activation_data <- gene_expression %>%
-    filter(DevelopmentalStage %in% c(trough_stage$DevelopmentalStage, peak_stage$DevelopmentalStage))
-
-  # Require at least 2 samples per stage (total >= 4)
-  if(nrow(activation_data) < 4) return(NULL)
-
-  t_test_result <- t.test(TPM ~ DevelopmentalStage, data = activation_data)
-
-  activation_ratio <- peak_stage$Mean_TPM / trough_stage$Mean_TPM
-  log2_activation  <- log2(activation_ratio)
-
-  early_expression <- ifelse(nrow(early_stage) > 0, early_stage$Mean_TPM, NA)
-
-  out <- data.frame(
-    gene_name = gene_name,
-    trough_stage = as.character(trough_stage$DevelopmentalStage),
-    trough_TPM = trough_stage$Mean_TPM,
-    peak_stage = as.character(peak_stage$DevelopmentalStage),
-    peak_TPM = peak_stage$Mean_TPM,
-    activation_ratio = activation_ratio,
-    log2_activation = log2_activation,
-    p_value_activation = t_test_result$p.value,
-    early_expression = early_expression,
-    stringsAsFactors = FALSE
-  )
-
-  return(out)
-}
-
-# ==================== 6) Target genes for MZT analysis ====================
+# ==================== 5) Target genes for MZT analysis ====================
 target_genes <- data.frame(
   GeneID = c("MphaG08722.3", "MphaG09302.3", "MphaG10013.1", "MphaG03798.1",
              "MphaG08516.1", "MphaG00620.3", "MphaG04660.1", "MphaG13938.1",
@@ -210,10 +161,9 @@ cat("Starting comprehensive MZT analysis for", nrow(target_genes), "genes...\n\n
 
 # Containers for outputs
 maternal_results <- list()
-zygotic_results  <- list()
 all_expression_data <- list()
 
-# ==================== 7) Main loop: extract expression, run tests ====================
+# ==================== 6) Main loop: extract expression, run tests ====================
 for(i in 1:nrow(target_genes)) {
 
   gene_id   <- target_genes$GeneID[i]
@@ -233,13 +183,9 @@ for(i in 1:nrow(target_genes)) {
   # Maternal clearance analysis (0–12h vs 12–24h)
   mat_res <- analyze_maternal_clearance_unified(gene_expression, gene_name)
   if(!is.null(mat_res)) maternal_results[[gene_name]] <- mat_res
-
-  # Zygotic activation (Embryo_0–12h vs Embryo_12–24h)
-  zyg_res <- analyze_zygotic_activation(gene_expression, gene_name, stage_order)
-  if(!is.null(zyg_res)) zygotic_results[[gene_name]] <- zyg_res
 }
 
-# ==================== 8) Multiple testing correction and result annotation ====================
+# ==================== 7) Multiple testing correction and result annotation ====================
 
 # ---- Maternal clearance results ----
 maternal_df <- do.call(rbind, maternal_results)
@@ -261,33 +207,13 @@ maternal_df$Clearance_Pattern <- ifelse(
          "No Significant Clearance")
 )
 
-# ---- Zygotic activation results ----
-zygotic_df <- do.call(rbind, zygotic_results)
-
-# Benjamini–Hochberg FDR correction across all tested genes
-zygotic_df$FDR_activation <- p.adjust(zygotic_df$p_value_activation, method = "fdr")
-
-# Significance label
-zygotic_df$Activation_Significance <- ifelse(
-  zygotic_df$FDR_activation < 0.001, "***",
-  ifelse(zygotic_df$FDR_activation < 0.01, "**",
-         ifelse(zygotic_df$FDR_activation < 0.05, "*", "ns"))
-)
-
-# Activation pattern classification (based on FDR and activation ratio thresholds)
-zygotic_df$Activation_Pattern <- ifelse(
-  zygotic_df$FDR_activation < 0.05 & zygotic_df$activation_ratio > 4, "Strong Activation",
-  ifelse(zygotic_df$FDR_activation < 0.05 & zygotic_df$activation_ratio > 2, "Moderate Activation",
-         "No Significant Activation")
-)
-
-# ==================== 9) Output: maternal clearance ====================
+# ==================== 8) Output: maternal clearance ====================
 cat("\n")
 cat(paste(rep("=", 80), collapse = ""), "\n")
 cat("MATERNAL CLEARANCE ANALYSIS RESULTS\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Significant maternal clearance 
+# Significant maternal clearance
 significant_clearance <- maternal_df %>%
   filter(FDR < 0.05 & fold_change < 0.7) %>%
   arrange(fold_change)
@@ -297,23 +223,7 @@ print(significant_clearance %>%
         select(gene_name, mean_0_12h, mean_12_24h, percent_change,
                fold_change, log2_fold_change, FDR, Clearance_Pattern, Clearance_Significance))
 
-# ==================== 10) Output: zygotic activation ====================
-cat("\n")
-cat(paste(rep("=", 80), collapse = ""), "\n")
-cat("ZYGOTIC ACTIVATION ANALYSIS RESULTS\n")
-cat(paste(rep("=", 80), collapse = ""), "\n\n")
-
-# Significant activation 
-significant_activation <- zygotic_df %>%
-  filter(FDR_activation < 0.05 & activation_ratio > 2) %>%
-  arrange(desc(activation_ratio))
-
-cat("Significantly Activated Zygotic Transcripts (FDR < 0.05 & activation_ratio > 2):\n")
-print(significant_activation %>%
-        select(gene_name, trough_stage, trough_TPM, peak_stage, peak_TPM,
-               activation_ratio, log2_activation, FDR_activation, Activation_Pattern, Activation_Significance))
-
-# ==================== 11) Focus genes: formatted maternal clearance table ====================
+# ==================== 9) Focus genes: formatted maternal clearance table ====================
 genes_of_interest <- c("Mad", "ewg", "Clamp", "vfl", "opa")
 
 focus_clearance <- maternal_df %>%
@@ -339,9 +249,9 @@ cat("FOCUS GENES: MATERNAL CLEARANCE (FORMATTED TABLE)\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 print(focus_clearance)
 
-# ==================== 12) save outputs ====================
+# ==================== 10) save outputs ====================
 # write.csv(maternal_df, file = "maternal_clearance_results.csv", row.names = FALSE)
-# write.csv(zygotic_df,  file = "zygotic_activation_results.csv", row.names = FALSE)
 # write.csv(focus_clearance, file = "focus_genes_maternal_clearance_table.csv", row.names = FALSE)
 
 cat("\nAll done!\n")
+
