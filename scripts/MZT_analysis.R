@@ -1,17 +1,18 @@
 rm(list = ls()); gc()
 options(stringsAsFactors = FALSE, warn = -1)
 
-# ==================== 0) Working directory and packages ====================
+# ==================== 0) Working directory ====================
 setwd("C:/Users/Xuefen Xu/Documents/RNA/SRR")
 
+# ==================== 0.1) Packages ====================
 suppressPackageStartupMessages({
-  library(ggplot2)
+  library(data.table)
   library(dplyr)
   library(tidyr)
-  library(ggpubr)
-  library(gridExtra)
-  library(patchwork)
-  library(grid)
+  library(stringr)
+  library(readr)
+  library(DESeq2)
+  library(ggplot2)
 })
 
 # ==================== 1) Developmental stage order ====================
@@ -21,237 +22,241 @@ stage_order <- c(
   "Embryo_156-168h", "Embryo_180-192h"
 )
 
+BASELINE_STAGE <- "Embryo_0-12h"
+MZT_STAGE      <- "Embryo_12-24h"
+POST_START     <- "Embryo_36-48h"
+
+OUTDIR <- "MZT_RESULTS_OPTIMIZED"
+dir.create(OUTDIR, showWarnings = FALSE, recursive = TRUE)
+
 # ==================== 2) Locate all quant.sf files ====================
-quant_paths <- list.files(
-  pattern   = "quant.sf",
-  recursive = TRUE,
-  full.names = TRUE
-)
-
+quant_paths <- list.files(pattern = "quant.sf$", recursive = TRUE, full.names = TRUE)
 cat("Total samples found:", length(quant_paths), "\n")
-if(length(quant_paths) == 0) {
-  stop("No quant.sf files found. Please check the working directory or the folder structure.")
-}
+if (length(quant_paths) == 0) stop("No quant.sf files found. Check folder structure.")
 
-# ==================== 3) Extract gene expression from quant.sf ====================
-# This function reads each Salmon quant.sf, extracts TPM/NumReads for a target transcript/gene ID,
-# and attaches sample metadata inferred from the file path.
-extract_gene_expression <- function(quant_paths, gene_id) {
-
-  all_data <- data.frame()
-
-  for(i in seq_along(quant_paths)) {
-
-    path <- quant_paths[i]
-
-    # Sample name is defined as the directory two levels above quant.sf
-    sample_name <- basename(dirname(dirname(path)))
-
-    # Extract developmental stage from the file path (e.g., Embryo_12-24h)
-    developmental_stage <- ifelse(
-      grepl("Embryo_[0-9]+-[0-9]+h", path),
-      gsub(".*(Embryo_[0-9]+-[0-9]+h).*", "\\1", path),
-      "Unknown"
-    )
-
-    # Infer strain based on sample naming convention
-    strain <- ifelse(grepl("_4030", sample_name), "4030", "D03")
-
-    # Read quant.sf
-    dat <- read.table(path, header = TRUE, sep = "\t", quote = "", comment.char = "")
-
-    # Extract the row matching the target gene/transcript ID
-    gene_row <- dat[dat$Name == gene_id, , drop = FALSE]
-
-    # If the gene/transcript is not present, set TPM/NumReads to 0
-    if(nrow(gene_row) > 0) {
-      all_data <- rbind(all_data, data.frame(
-        Sample = sample_name,
-        DevelopmentalStage = developmental_stage,
-        Strain = strain,
-        TPM = gene_row$TPM[1],
-        NumReads = gene_row$NumReads[1],
-        GenePresent = TRUE,
-        stringsAsFactors = FALSE
-      ))
-    } else {
-      all_data <- rbind(all_data, data.frame(
-        Sample = sample_name,
-        DevelopmentalStage = developmental_stage,
-        Strain = strain,
-        TPM = 0,
-        NumReads = 0,
-        GenePresent = FALSE,
-        stringsAsFactors = FALSE
-      ))
-    }
-  }
-
-  return(all_data)
-}
-
-# ==================== 4) Unified maternal clearance analysis (0–12h vs 12–24h) ====================
-# This function quantifies maternal transcript clearance by:
-# - comparing expression between Embryo_0-12h and Embryo_12-24h,
-# - computing fold-change, log2 fold-change, percent change,
-# - performing a two-sample t-test,
-# - computing effect size (Cohen's d).
-analyze_maternal_clearance_unified <- function(gene_expression, gene_name) {
-
-  early_data <- gene_expression %>%
-    filter(DevelopmentalStage %in% c("Embryo_0-12h", "Embryo_12-24h"))
-
-  # Require at least 2 samples per stage (total >= 4)
-  if(nrow(early_data) < 4) return(NULL)
-
-  stage_stats <- early_data %>%
-    group_by(DevelopmentalStage) %>%
-    summarise(
-      n = n(),
-      Mean_TPM = mean(TPM),
-      SD_TPM = sd(TPM),
-      SE_TPM = sd(TPM) / sqrt(n()),
-      .groups = "drop"
-    )
-
-  mean_0_12h  <- stage_stats$Mean_TPM[stage_stats$DevelopmentalStage == "Embryo_0-12h"]
-  mean_12_24h <- stage_stats$Mean_TPM[stage_stats$DevelopmentalStage == "Embryo_12-24h"]
-
-  fold_change <- mean_12_24h / mean_0_12h
-  log2_fc     <- log2(fold_change)
-
-  # Percent change (12–24h relative to 0–12h; negative value indicates a decrease)
-  percent_change <- ((mean_12_24h - mean_0_12h) / mean_0_12h) * 100
-
-  # Two-sample t-test
-  t_test_result <- t.test(TPM ~ DevelopmentalStage, data = early_data)
-
-  # Cohen's d (positive if 0–12h > 12–24h)
-  sd_0 <- stage_stats$SD_TPM[stage_stats$DevelopmentalStage == "Embryo_0-12h"]
-  sd_1 <- stage_stats$SD_TPM[stage_stats$DevelopmentalStage == "Embryo_12-24h"]
-  cohens_d <- (mean_0_12h - mean_12_24h) / sqrt((sd_0^2 + sd_1^2) / 2)
-
-  out <- data.frame(
-    gene_name = gene_name,
-    mean_0_12h = mean_0_12h,
-    mean_12_24h = mean_12_24h,
-    fold_change = fold_change,
-    log2_fold_change = log2_fc,
-    percent_change = percent_change,
-    p_value = t_test_result$p.value,
-    cohens_d = cohens_d,
-    n_0_12h = stage_stats$n[stage_stats$DevelopmentalStage == "Embryo_0-12h"],
-    n_12_24h = stage_stats$n[stage_stats$DevelopmentalStage == "Embryo_12-24h"],
-    stringsAsFactors = FALSE
+# ==================== 3) Build sample_info (Sample / Stage / Strain / Path) ====================
+sample_info <- tibble(quant_path = quant_paths) %>%
+  mutate(
+    Sample = basename(dirname(dirname(quant_path))),  # two levels above quant.sf (as you used)
+    Stage  = ifelse(
+      grepl("Embryo_[0-9]+-[0-9]+h", quant_path),
+      str_extract(quant_path, "Embryo_[0-9]+-[0-9]+h"),
+      NA_character_
+    ),
+    Strain = ifelse(grepl("_4030", Sample), "4030", "D03")
   )
 
-  return(out)
+if (any(is.na(sample_info$Stage))) {
+  bad <- sample_info$quant_path[is.na(sample_info$Stage)][1:min(10, sum(is.na(sample_info$Stage)))]
+  stop(paste0("[ERROR] Cannot parse Stage from some paths. Examples:\n", paste(bad, collapse="\n")))
 }
 
-# ==================== 5) Target genes for MZT analysis ====================
+sample_info$Stage <- factor(sample_info$Stage, levels = stage_order)
+if (any(is.na(sample_info$Stage))) {
+  bad2 <- unique(as.character(sample_info$Stage[is.na(sample_info$Stage)]))
+  stop("[ERROR] Some parsed stages are not in stage_order. Please update stage_order to match your names.")
+}
+
+write.csv(sample_info, file.path(OUTDIR, "sample_info.csv"), row.names = FALSE)
+
+# ==================== 4) Read quant.sf -> build gene-level matrices (NumReads + TPM) ====================
+read_quant_min <- function(path) {
+  dat <- fread(path)
+  dat[, .(Name, TPM, NumReads)]
+}
+
+cat("Reading quant.sf files and building matrices...\n")
+quant_list <- lapply(sample_info$quant_path, read_quant_min)
+names(quant_list) <- sample_info$Sample
+
+# union of gene IDs across samples
+all_gene_ids <- Reduce(union, lapply(quant_list, function(x) x$Name))
+
+# build counts matrix
+count_mat <- sapply(quant_list, function(df) {
+  v <- df$NumReads
+  names(v) <- df$Name
+  out <- v[all_gene_ids]
+  out[is.na(out)] <- 0
+  as.numeric(out)
+})
+rownames(count_mat) <- all_gene_ids
+colnames(count_mat) <- names(quant_list)
+
+# build TPM matrix
+tpm_mat <- sapply(quant_list, function(df) {
+  v <- df$TPM
+  names(v) <- df$Name
+  out <- v[all_gene_ids]
+  out[is.na(out)] <- 0
+  as.numeric(out)
+})
+rownames(tpm_mat) <- all_gene_ids
+colnames(tpm_mat) <- names(quant_list)
+
+write.csv(count_mat, file.path(OUTDIR, "gene_counts_NumReads.csv"))
+write.csv(tpm_mat,   file.path(OUTDIR, "gene_TPM.csv"))
+
+# ==================== 5) Target genes (GeneID -> GeneName) ====================
 target_genes <- data.frame(
-  GeneID = c("MphaG08722.3", "MphaG09302.3", "MphaG10013.1", "MphaG03798.1",
-             "MphaG08516.1", "MphaG00620.3", "MphaG04660.1", "MphaG13938.1",
-             "MphaG01178.1", "MphaG01177.1"),
-  GeneName = c("Trl", "Clamp", "Mad", "opa", "brk", "ewg", "hry", "vfl", "mirr", "ara"),
+  GeneID = c(
+    "MphaG08722.3", # Trl
+    "MphaG09302.3", # Clamp
+    "MphaG10013.1", # Mad
+    "MphaG08516.1", # opa
+    "MphaG00620.3", # ewg
+    "MphaG13938.1", # zld
+    "MphaG01178.1", # mirr
+    "MphaG01177.1"  # ara
+  ),
+  GeneName = c("Trl", "Clamp", "Mad", "opa", "ewg", "zld", "mirr", "ara"),
   stringsAsFactors = FALSE
 )
 
-cat("Starting comprehensive MZT analysis for", nrow(target_genes), "genes...\n\n")
+# ==================== 6) DESeq2 for 12–24h vs 0–12h (count-based, genome-wide) ====================
+cat("Running DESeq2 (counts) for 12–24h vs 0–12h...\n")
 
-# Containers for outputs
-maternal_results <- list()
-all_expression_data <- list()
+coldata <- sample_info %>%
+  select(Sample, Stage, Strain) %>%
+  as.data.frame()
+rownames(coldata) <- coldata$Sample
 
-# ==================== 6) Main loop: extract expression, run tests ====================
-for(i in 1:nrow(target_genes)) {
+# ensure sample order aligned
+count_mat2 <- count_mat[, rownames(coldata), drop = FALSE]
 
-  gene_id   <- target_genes$GeneID[i]
-  gene_name <- target_genes$GeneName[i]
+dds <- DESeqDataSetFromMatrix(
+  countData = round(count_mat2),
+  colData   = coldata,
+  design    = ~ Strain + Stage
+)
 
-  cat("Analyzing", gene_name, "(", gene_id, ")...\n")
+dds <- dds[rowSums(counts(dds)) >= 10, ]
+dds <- DESeq(dds)
 
-  # Extract expression for this gene across all samples
-  gene_expression <- extract_gene_expression(quant_paths, gene_id)
+res <- results(dds, contrast = c("Stage", MZT_STAGE, BASELINE_STAGE)) %>% as.data.frame()
+res$GeneID <- rownames(res)
+res$pct_change <- (2^res$log2FoldChange - 1) * 100
 
-  # Keep only valid embryo stages and enforce ordering
-  gene_expression <- gene_expression[gene_expression$DevelopmentalStage %in% stage_order, ]
-  gene_expression$DevelopmentalStage <- factor(gene_expression$DevelopmentalStage, levels = stage_order)
+res_out <- res %>%
+  select(GeneID, log2FoldChange, pct_change, pvalue, padj, baseMean) %>%
+  arrange(padj)
 
-  all_expression_data[[gene_name]] <- gene_expression
+write.csv(res_out, file.path(OUTDIR, "DESeq2_12_24_vs_0_12_full.csv"), row.names = FALSE)
 
-  # Maternal clearance analysis (0–12h vs 12–24h)
-  mat_res <- analyze_maternal_clearance_unified(gene_expression, gene_name)
-  if(!is.null(mat_res)) maternal_results[[gene_name]] <- mat_res
+# Focus summary for target genes
+res_focus <- res_out %>%
+  filter(GeneID %in% target_genes$GeneID) %>%
+  left_join(target_genes, by = "GeneID") %>%
+  transmute(
+    GeneName, GeneID,
+    pct_change = round(pct_change, 1),
+    log2FoldChange = log2FoldChange,
+    FDR = padj
+  ) %>%
+  arrange(match(GeneName, target_genes$GeneName))
+
+write.csv(res_focus, file.path(OUTDIR, "DESeq2_focus_genes_summary.csv"), row.names = FALSE)
+print(res_focus)
+
+# Write text-ready lines
+fmt_sci <- function(x, digits=2) ifelse(is.na(x), NA, format(x, scientific=TRUE, digits=digits))
+text_lines <- res_focus %>%
+  mutate(
+    pct_txt = ifelse(pct_change >= 0, paste0("+", pct_change, "%"), paste0(pct_change, "%")),
+    fdr_txt = fmt_sci(FDR, digits = 2),
+    line = paste0(GeneName, " ", pct_txt, " (FDR = ", fdr_txt, ")")
+  ) %>% pull(line)
+
+writeLines(text_lines, con = file.path(OUTDIR, "WRITE_READY_clearance_lines.txt"))
+
+# ==================== 7) TPM time-course summaries for GOI + plotting ====================
+cat("Summarizing TPM time-course and plotting...\n")
+
+tpm_long <- as.data.frame(tpm_mat)
+tpm_long$GeneID <- rownames(tpm_long)
+
+tpm_long <- tpm_long %>%
+  pivot_longer(-GeneID, names_to = "Sample", values_to = "TPM") %>%
+  left_join(sample_info %>% select(Sample, Stage, Strain), by = c("Sample" = "Sample"))
+
+stage_mean <- tpm_long %>%
+  group_by(GeneID, Stage) %>%
+  summarise(mean_TPM = mean(TPM, na.rm=TRUE), .groups="drop")
+
+write.csv(stage_mean, file.path(OUTDIR, "stage_mean_TPM_all_genes.csv"), row.names = FALSE)
+
+# Plot only target genes
+plot_df <- stage_mean %>%
+  filter(GeneID %in% target_genes$GeneID) %>%
+  left_join(target_genes, by = "GeneID") %>%
+  mutate(Stage = factor(Stage, levels = stage_order))
+
+if (nrow(plot_df) == 0) {
+  message("[WARNING] plot_df is empty. Check whether GeneID in target_genes exists in tpm_mat rownames.")
+} else {
+  p <- ggplot(plot_df, aes(x = Stage, y = mean_TPM, group = GeneName)) +
+    geom_line() + geom_point() +
+    facet_wrap(~ GeneName, scales = "free_y") +
+    theme_bw(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x=NULL, y="Mean TPM", title="Time-course expression (mean TPM per stage)")
+
+  ggsave(file.path(OUTDIR, "GOI_timecourse_TPM_faceted.pdf"), p, width = 12, height = 6)
 }
 
-# ==================== 7) Multiple testing correction and result annotation ====================
+# ==================== 8) ara/mirr strictly zygotic-like summary (pre low, post rise, peak stage) ====================
+cat("Computing zygotic-like summaries for ara/mirr...\n")
 
-# ---- Maternal clearance results ----
-maternal_df <- do.call(rbind, maternal_results)
+summarize_zygotic_pattern <- function(gene_id, gene_name,
+                                     pre_stages = c("Embryo_0-12h","Embryo_12-24h"),
+                                     post_start = "Embryo_36-48h",
+                                     stage_order,
+                                     sustained_frac = 0.5) {
 
-# Benjamini–Hochberg FDR correction across all tested genes
-maternal_df$FDR <- p.adjust(maternal_df$p_value, method = "fdr")
+  df <- tpm_long %>%
+    filter(GeneID == gene_id, as.character(Stage) %in% stage_order) %>%
+    group_by(Stage) %>%
+    summarise(meanTPM = mean(TPM, na.rm=TRUE), .groups="drop") %>%
+    mutate(Stage = factor(Stage, levels=stage_order)) %>%
+    arrange(Stage)
 
-# Significance label
-maternal_df$Clearance_Significance <- ifelse(
-  maternal_df$FDR < 0.001, "***",
-  ifelse(maternal_df$FDR < 0.01, "**",
-         ifelse(maternal_df$FDR < 0.05, "*", "ns"))
+  pre_mean <- df %>%
+    filter(as.character(Stage) %in% pre_stages) %>%
+    summarise(pre = mean(meanTPM)) %>% pull(pre)
+
+  post_stages <- stage_order[match(post_start, stage_order):length(stage_order)]
+  post_df <- df %>% filter(as.character(Stage) %in% post_stages)
+
+  peak_stage <- as.character(post_df$Stage[which.max(post_df$meanTPM)])
+  peak_val   <- max(post_df$meanTPM)
+
+  # “remain elevated”: all stages after peak >= sustained_frac * peak
+  idx_peak <- match(peak_stage, stage_order)
+  later_stages <- stage_order[idx_peak:length(stage_order)]
+  later_df <- df %>% filter(as.character(Stage) %in% later_stages)
+
+  sustained_high <- all(later_df$meanTPM >= sustained_frac * peak_val)
+
+  data.frame(
+    GeneName = gene_name,
+    GeneID = gene_id,
+    pre_mean_TPM = pre_mean,
+    peak_stage = peak_stage,
+    peak_TPM = peak_val,
+    sustained_high = sustained_high,
+    stringsAsFactors = FALSE
+  )
+}
+
+ara_id  <- target_genes$GeneID[target_genes$GeneName == "ara"]
+mirr_id <- target_genes$GeneID[target_genes$GeneName == "mirr"]
+
+zygo_summary <- bind_rows(
+  summarize_zygotic_pattern(ara_id, "ara", stage_order=stage_order),
+  summarize_zygotic_pattern(mirr_id, "mirr", stage_order=stage_order)
 )
 
-# Clearance pattern classification (based on FDR and fold change thresholds)
-maternal_df$Clearance_Pattern <- ifelse(
-  maternal_df$FDR < 0.05 & maternal_df$fold_change < 0.5, "Strong Clearance",
-  ifelse(maternal_df$FDR < 0.05 & maternal_df$fold_change < 0.7, "Moderate Clearance",
-         "No Significant Clearance")
-)
+write.csv(zygo_summary, file.path(OUTDIR, "ara_mirr_zygotic_summary.csv"), row.names = FALSE)
+print(zygo_summary)
 
-# ==================== 8) Output: maternal clearance ====================
-cat("\n")
-cat(paste(rep("=", 80), collapse = ""), "\n")
-cat("MATERNAL CLEARANCE ANALYSIS RESULTS\n")
-cat(paste(rep("=", 80), collapse = ""), "\n\n")
-
-# Significant maternal clearance
-significant_clearance <- maternal_df %>%
-  filter(FDR < 0.05 & fold_change < 0.7) %>%
-  arrange(fold_change)
-
-cat("Significantly Cleared Maternal Transcripts (FDR < 0.05 & fold_change < 0.7):\n")
-print(significant_clearance %>%
-        select(gene_name, mean_0_12h, mean_12_24h, percent_change,
-               fold_change, log2_fold_change, FDR, Clearance_Pattern, Clearance_Significance))
-
-# ==================== 9) Focus genes: formatted maternal clearance table ====================
-genes_of_interest <- c("Mad", "ewg", "Clamp", "vfl", "opa")
-
-focus_clearance <- maternal_df %>%
-  filter(gene_name %in% genes_of_interest) %>%
-  mutate(
-    mean_0_12h = round(mean_0_12h, 2),
-    mean_12_24h = round(mean_12_24h, 2),
-    percent_change = round(percent_change, 1),
-    fold_change = round(fold_change, 3),
-    FDR = signif(FDR, 4),
-    p_value = signif(p_value, 4),
-    Significance = Clearance_Significance,
-    Expression_Change = sprintf("%.2f → %.2f TPM", mean_0_12h, mean_12_24h),
-    Percent_Decrease = sprintf("%.1f%%", abs(percent_change)),
-    Statistical_Significance = sprintf("FDR=%g %s", FDR, Significance)
-  ) %>%
-  select(gene_name, Expression_Change, Percent_Decrease, fold_change, p_value, FDR, Statistical_Significance) %>%
-  arrange(match(gene_name, genes_of_interest))
-
-cat("\n")
-cat(paste(rep("=", 80), collapse = ""), "\n")
-cat("FOCUS GENES: MATERNAL CLEARANCE (FORMATTED TABLE)\n")
-cat(paste(rep("=", 80), collapse = ""), "\n\n")
-print(focus_clearance)
-
-# ==================== 10) save outputs ====================
-# write.csv(maternal_df, file = "maternal_clearance_results.csv", row.names = FALSE)
-# write.csv(focus_clearance, file = "focus_genes_maternal_clearance_table.csv", row.names = FALSE)
-
-cat("\nAll done!\n")
-
+cat("\nDONE. All outputs saved in: ", OUTDIR, "\n")
